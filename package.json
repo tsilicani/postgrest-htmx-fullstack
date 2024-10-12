@@ -1,5 +1,6 @@
 {
   "scripts": {
-    "docker-compose": "docker compose up"
+    "docker-compose": "docker compose up",
+    "restart-postgrest": "docker compose restart postgrest"
   }
 }

@@ -18,20 +18,98 @@ SELECT
 
 CREATE table
     IF NOT EXISTS pets (
-        id serial NOT NULL,
-        name text NOT NULL,
-        breed text NOT NULL,
-        age int4 NOT NULL,
-        owner text NOT NULL
+        name text NOT NULL
     );
 
 COMMIT;
 
 INSERT INTO
-    pets (name, breed, age, owner)
+    pets (name)
 VALUES
-    ('Buddy', 'Golden Retriever', 3, 'John Doe'),
-    ('Lucy', 'Labrador', 5, 'Jane Smith'),
-    ('Charlie', 'Poodle', 2, 'Alice Johnson'),
-    ('Daisy', 'Boxer', 4, 'Mike Brown'),
-    ('Max', 'Beagle', 6, 'Sarah White');
+    ('Buddy'),
+    ('Lucy'),
+    ('Charlie'),
+    ('Bobby');
+
+COMMIT;
+
+-- Next, add the text/html as a Media Type Handlers. 
+-- With this, PostgREST can identify the request made by your web browser (with the Accept: text/html header)
+-- and return a raw HTML document file.
+create domain "text/html" as text;
+
+create or replace function public.sanitize_html(text) returns text as $$
+  select replace(replace(replace(replace(replace($1, '&', '&amp;'), '"', '&quot;'),'>', '&gt;'),'<', '&lt;'), '''', '&apos;')
+$$ language sql;
+
+create or replace function html_pet(pets) returns text as $$
+  select format($html$
+    <div>
+      <%2$s>
+        %3$s
+      </%2$s>
+    </div>
+    $html$,
+    $1.name,
+    'span',
+    sanitize_html($1.name)
+  );
+$$ language sql stable;
+
+create or replace function html_all_pets() returns text as $$
+  select coalesce(
+    string_agg(html_pet(p), '<hr/>' order by p.name),
+    '<p><em>There is no other pet.</em></p>'
+  )
+  from pets p;
+$$ language sql;
+
+create or replace function add_pet(_name text) returns "text/html" as $$
+  insert into pets (name) values (_name);
+  select html_all_pets();
+$$ language sql;
+
+create or replace function index() returns "text/html" as $$
+  select $html$
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>PostgREST + HTMX To-Do List</title>
+      <!-- Pico CSS for CSS styling -->
+      <link href="https://cdn.jsdelivr.net/npm/@picocss/pico@next/css/pico.min.css" rel="stylesheet"/>
+      <!-- htmx for AJAX requests -->
+      <script src="https://unpkg.com/htmx.org"></script>
+    </head>
+    <body>
+      <main class="container"
+            style="max-width: 600px"
+            hx-headers='{"Accept": "text/html"}'>
+        <article>
+          <h5 style="text-align: center;">
+            PostgREST + HTMX Pets
+          </h5>
+          <form hx-post="/rpc/add_pet"
+                hx-target="#pet-list-area"
+                hx-trigger="submit"
+                hx-on="htmx:afterRequest: this.reset()">
+            <input type="text" name="_name" placeholder="Add a pet...">
+          </form>
+          <div id="pet-list-area">
+            $html$
+              || html_all_pets() ||
+            $html$
+          <div>
+        </article>
+      </main>
+      <!-- Script for Ionicons icons -->
+      <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
+      <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
+    </body>
+    </html>
+  $html$;
+$$ language sql;
+
+grant execute on function add_pet(text) to anon;
+GRANT UPDATE, INSERT, DELETE ON TABLE public.pets TO anon;
